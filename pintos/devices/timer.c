@@ -7,8 +7,6 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-#include "kernel/list.h"
-
 
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -31,12 +29,6 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static bool incert_sleep (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-bool list_empty (struct list *);
-enum intr_level intr_disable (void);
-struct thread *thread_current(void);
-void thread_block (void);
-struct list_elem *list_front (struct list *);
-enum intr_level intr_set_level (enum intr_level);
 
 static struct list sleep_list;
 
@@ -106,14 +98,15 @@ timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
 	int64_t awake_ticks = start + ticks;
 
+	ASSERT (intr_get_level () == INTR_ON);
 	thread_current()->timer_tick = awake_ticks;
 
 	if (timer_elapsed (start) < ticks)
 	{
-		intr_disable();
+		enum intr_level old_level = intr_disable();
 		list_insert_ordered(&sleep_list, &thread_current()->sleep_elem, incert_sleep, NULL);
 		thread_block();
-		intr_set_level (INTR_ON);
+		intr_set_level (old_level);
 	}
 }
 
