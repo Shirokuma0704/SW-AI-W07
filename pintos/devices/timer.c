@@ -7,6 +7,8 @@
 #include "threads/io.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
+#include "kernel/list.h"
+
 
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -28,6 +30,16 @@ static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
+static bool incert_sleep (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+bool list_empty (struct list *);
+enum intr_level intr_disable (void);
+struct thread *thread_current(void);
+void thread_block (void);
+struct list_elem *list_front (struct list *);
+enum intr_level intr_set_level (enum intr_level);
+
+static struct list sleep_list;
+
 
 /* Sets up the 8254 Programmable Interval Timer (PIT) to
    interrupt PIT_FREQ times per second, and registers the
@@ -41,6 +53,7 @@ timer_init (void) {
 	outb (0x43, 0x34);    /* CW: counter 0, LSB then MSB, mode 2, binary. */
 	outb (0x40, count & 0xff);
 	outb (0x40, count >> 8);
+	list_init (&sleep_list);
 
 	intr_register_ext (0x20, timer_interrupt, "8254 Timer");
 }
@@ -91,10 +104,17 @@ timer_elapsed (int64_t then) {
 void
 timer_sleep (int64_t ticks) {
 	int64_t start = timer_ticks ();
+	int64_t awake_ticks = start + ticks;
 
-	ASSERT (intr_get_level () == INTR_ON);
-	while (timer_elapsed (start) < ticks)
-		thread_yield ();
+	thread_current()->timer_tick = awake_ticks;
+
+	if (timer_elapsed (start) < ticks)
+	{
+		intr_disable();
+		list_insert_ordered(&sleep_list, &thread_current()->sleep_elem, incert_sleep, NULL);
+		thread_block();
+		intr_set_level (INTR_ON);
+	}
 }
 
 /* Suspends execution for approximately MS milliseconds. */
@@ -125,6 +145,10 @@ timer_print_stats (void) {
 static void
 timer_interrupt (struct intr_frame *args UNUSED) {
 	ticks++;
+	while (list_empty (&sleep_list) != true && list_entry(list_front(&sleep_list), struct thread, sleep_elem)->timer_tick <= ticks)
+	{
+		thread_unblock(list_entry(list_pop_front(&sleep_list), struct thread, sleep_elem));
+	}
 	thread_tick ();
 }
 
@@ -183,4 +207,13 @@ real_time_sleep (int64_t num, int32_t denom) {
 		ASSERT (denom % 1000 == 0);
 		busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000));
 	}
+}
+
+static bool incert_sleep (const struct list_elem *a,const struct list_elem *b, void *aux UNUSED)
+{
+	int64_t a_tick = list_entry(a, struct thread, sleep_elem)->timer_tick;
+	int64_t b_tick = list_entry(b, struct thread, sleep_elem)->timer_tick;
+
+	if (a_tick < b_tick) return true;
+	return false;
 }
