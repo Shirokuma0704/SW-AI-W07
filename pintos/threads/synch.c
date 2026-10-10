@@ -29,7 +29,6 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
-
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "kernel/list.h"
@@ -46,8 +45,6 @@
 static bool priority_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
 static bool cond_priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 static bool lock_priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
-
-
 
 void
 sema_init (struct semaphore *sema, unsigned value) {
@@ -212,6 +209,7 @@ lock_acquire (struct lock *lock) {
 	}
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
+	thread_current()->wait_lock_ptr = NULL;
 }
 
 /* LOCK 획득을 시도해서 성공하면 true, 실패하면 false를
@@ -265,7 +263,6 @@ lock_release (struct lock *lock) {
 		thread_current()->priority = (thread_current()->priority > list_entry(list_front(&thread_current()->donate_list),struct thread, donate_elem)->priority ? thread_current()->priority : list_entry(list_front(&thread_current()->donate_list),struct thread, donate_elem)->priority);
 	}
 	sema_up (&lock->semaphore);
-	thread_current()->wait_lock_ptr = NULL;
 }
 
 /* 현재 스레드가 LOCK을 쥐고 있으면 true, 아니면 false를

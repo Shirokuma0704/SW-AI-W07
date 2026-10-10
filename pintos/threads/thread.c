@@ -330,7 +330,7 @@ thread_set_priority (int new_priority) {
 	thread_current ()->initial_priority = new_priority;
 // 레디 리스트가 비어있지 않으며, 기존 스래드의 새 우선도가 다음 최우선 스레드의 우선도보다 낮을때
 	// 기존 스래드가 Ready_list에 정렬삽입되며 Running thread변경
-	if (list_empty (&ready_list) != true && new_priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
+	if (list_empty (&ready_list) != true && curr->priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
 	{
 		thread_yield();
 	}
