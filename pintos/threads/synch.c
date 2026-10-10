@@ -43,6 +43,7 @@
    - up or "V": increment the value (and wake up one waiting
    thread, if any). */
 static bool priority_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
+static bool cond_priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
 
 void
 sema_init (struct semaphore *sema, unsigned value) {
@@ -314,8 +315,11 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED) {
 	ASSERT (lock_held_by_current_thread (lock));
 
 	if (!list_empty (&cond->waiters))
+	{
+		list_sort (&cond->waiters, cond_priority_sort, NULL);
 		sema_up (&list_entry (list_pop_front (&cond->waiters),
 					struct semaphore_elem, elem)->semaphore);
+	}
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by
@@ -337,6 +341,17 @@ static bool priority_sort(const struct list_elem *a, const struct list_elem *b, 
 {
 	int a_priority = list_entry(a, struct thread, elem)->priority;
 	int b_priority = list_entry(b, struct thread, elem)->priority;
+
+	if (a_priority > b_priority) return true;
+	return false;
+}
+
+static bool cond_priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	int a_priority = list_entry(
+		list_front(&list_entry (a, struct semaphore_elem, elem)->semaphore.waiters), struct thread, elem)->priority;
+	int b_priority = list_entry(
+		list_front(&list_entry (b, struct semaphore_elem, elem)->semaphore.waiters), struct thread, elem)->priority;
 
 	if (a_priority > b_priority) return true;
 	return false;
