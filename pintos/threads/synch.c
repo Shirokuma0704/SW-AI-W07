@@ -31,6 +31,7 @@
 #include <string.h>
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "kernel/list.h"
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
@@ -41,6 +42,8 @@
 
    - up or "V": increment the value (and wake up one waiting
    thread, if any). */
+static bool priority_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
+
 void
 sema_init (struct semaphore *sema, unsigned value) {
 	ASSERT (sema != NULL);
@@ -66,7 +69,7 @@ sema_down (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	while (sema->value == 0) {
-		list_push_back (&sema->waiters, &thread_current ()->elem);
+		list_insert_ordered (&sema->waiters, &thread_current ()->elem, priority_sort, NULL);
 		thread_block ();
 	}
 	sema->value--;
@@ -110,9 +113,17 @@ sema_up (struct semaphore *sema) {
 
 	old_level = intr_disable ();
 	if (!list_empty (&sema->waiters))
-		thread_unblock (list_entry (list_pop_front (&sema->waiters),
-					struct thread, elem));
-	sema->value++;
+	{
+		struct list_elem *pop_waiter = list_pop_front (&sema->waiters);
+		thread_unblock (list_entry (pop_waiter, struct thread, elem));
+		sema->value++;
+		if (list_entry(pop_waiter, struct thread, elem)->priority > thread_current()->priority)
+			thread_yield();
+	}
+	else
+	{
+		sema->value++;
+	}
 	intr_set_level (old_level);
 }
 
@@ -320,4 +331,13 @@ cond_broadcast (struct condition *cond, struct lock *lock) {
 
 	while (!list_empty (&cond->waiters))
 		cond_signal (cond, lock);
+}
+
+static bool priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	int a_priority = list_entry(a, struct thread, elem)->priority;
+	int b_priority = list_entry(b, struct thread, elem)->priority;
+
+	if (a_priority > b_priority) return true;
+	return false;
 }
