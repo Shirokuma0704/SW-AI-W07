@@ -90,11 +90,13 @@ struct thread {
 	tid_t tid;                          /* 스레드 식별자. */
 	enum thread_status status;          /* 스레드 상태. */
 	char name[16];                      /* 이름(디버깅용). */
-	int priority;                       /* 우선순위. */
+	int priority;                       /* 현재 우선순위. */
+	int initial_priority; // 원소유 우선순위
 
 	/* thread.c와 synch.c가 공유해요. */
 	struct list_elem elem;              /* 리스트 원소. */
-	struct list_elem sleep_elem;/* 리스트 원소. */
+	struct list_elem sleep_elem;        /* 리스트 원소. */
+	struct list_elem donate_elem;
 
 #ifdef USERPROG
 	/* userprog/process.c가 소유해요. */
@@ -104,6 +106,8 @@ struct thread {
 	/* 스레드가 소유한 전체 가상 메모리용 테이블. */
 	struct supplemental_page_table spt;
 #endif
+	struct list donate_list; //기부받은 우선순위
+	struct lock *wait_lock_ptr; // 기다리는 락
 	int64_t timer_tick;
 
 	/* thread.c가 소유해요. */
@@ -144,5 +148,5 @@ int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
 
 void do_iret (struct intr_frame *tf);
-
+int MAX(int a, int b);
 #endif /* threads/thread.h */

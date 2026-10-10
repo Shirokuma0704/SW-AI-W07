@@ -29,6 +29,7 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
+
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "kernel/list.h"
@@ -44,6 +45,9 @@
    스레드가 있으면 하나를 깨워요). */
 static bool priority_sort(const struct list_elem *a,const struct list_elem *b, void *aux UNUSED);
 static bool cond_priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+static bool lock_priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
+
 
 void
 sema_init (struct semaphore *sema, unsigned value) {
@@ -200,6 +204,12 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!intr_context ());
 	ASSERT (!lock_held_by_current_thread (lock));
 
+	if (lock->holder != NULL)
+	{
+		if (lock->holder->priority < thread_current()->priority) lock->holder->priority = thread_current()->priority;
+		list_insert_ordered(&lock->holder->donate_list, &thread_current()->donate_elem, lock_priority_sort, NULL);
+		thread_current()->wait_lock_ptr = lock;
+	}
 	sema_down (&lock->semaphore);
 	lock->holder = thread_current ();
 }
@@ -234,8 +244,28 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
+	if (list_empty(&thread_current()->donate_list) != true)
+	{
+		struct list_elem *temp = &thread_current()->donate_list.head;
+		while (temp->next != &thread_current()->donate_list.tail)
+		{
+			if (list_entry(temp->next, struct thread, donate_elem)->wait_lock_ptr == lock)
+			{
+				list_remove(temp->next);
+			}
+			else
+				temp = list_next(temp);
+		}
+	}
+
 	lock->holder = NULL;
+	thread_current()->priority = thread_current()->initial_priority;
+	if (list_empty(&thread_current()->donate_list) != true)
+	{
+		thread_current()->priority = (thread_current()->priority > list_entry(list_front(&thread_current()->donate_list),struct thread, donate_elem)->priority ? thread_current()->priority : list_entry(list_front(&thread_current()->donate_list),struct thread, donate_elem)->priority);
+	}
 	sema_up (&lock->semaphore);
+	thread_current()->wait_lock_ptr = NULL;
 }
 
 /* 현재 스레드가 LOCK을 쥐고 있으면 true, 아니면 false를
@@ -352,6 +382,15 @@ static bool cond_priority_sort(const struct list_elem *a, const struct list_elem
 		list_front(&list_entry (a, struct semaphore_elem, elem)->semaphore.waiters), struct thread, elem)->priority;
 	int b_priority = list_entry(
 		list_front(&list_entry (b, struct semaphore_elem, elem)->semaphore.waiters), struct thread, elem)->priority;
+
+	if (a_priority > b_priority) return true;
+	return false;
+}
+
+static bool lock_priority_sort(const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+	int a_priority = list_entry(a, struct thread, donate_elem)->priority;
+	int b_priority = list_entry(b, struct thread, donate_elem)->priority;
 
 	if (a_priority > b_priority) return true;
 	return false;

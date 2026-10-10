@@ -64,6 +64,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+int MAX(int a, int b) { return a > b ? a : b; }
 
 static bool priority_sort(const struct list_elem *,const struct list_elem *, void *aux UNUSED);
 
@@ -319,7 +320,14 @@ thread_yield (void) {
 /* 현재 스레드의 우선순위를 NEW_PRIORITY로 설정해요. */
 void
 thread_set_priority (int new_priority) {
-	thread_current ()->priority = new_priority;
+
+	struct thread *curr = thread_current ();
+	if (list_empty(&curr->donate_list) == true)
+		curr->priority = new_priority;
+	else
+		curr->priority = MAX(list_entry( list_front(&curr->donate_list), struct thread, donate_elem)->priority, new_priority);
+	
+	thread_current ()->initial_priority = new_priority;
 // 레디 리스트가 비어있지 않으며, 기존 스래드의 새 우선도가 다음 최우선 스레드의 우선도보다 낮을때
 	// 기존 스래드가 Ready_list에 정렬삽입되며 Running thread변경
 	if (list_empty (&ready_list) != true && new_priority < list_entry(list_front(&ready_list), struct thread, elem)->priority)
@@ -422,7 +430,9 @@ init_thread (struct thread *t, const char *name, int priority) {
 	strlcpy (t->name, name, sizeof t->name);
 	t->tf.rsp = (uint64_t) t + PGSIZE - sizeof (void *);
 	t->priority = priority;
+	t->initial_priority = priority;
 	t->magic = THREAD_MAGIC;
+	list_init (&t->donate_list);
 }
 
 /* 다음에 스케줄할 스레드를 골라서 반환해요.  실행 큐가
