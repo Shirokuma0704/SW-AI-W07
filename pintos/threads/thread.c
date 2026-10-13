@@ -8,10 +8,13 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
+#include "kernel/fixedpoint.h"
+#include "devices/timer.h"
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "intrinsic.h"
+#include "../include/lib/kernel/fixedpoint.h"
 
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -29,6 +32,7 @@
 /* List of processes in THREAD_READY state, that is, processes
    that are ready to run but not actually running. */
 static struct list ready_list;
+static struct list thread_list;
 
 /* Idle thread. */
 static struct thread *idle_thread;
@@ -64,6 +68,7 @@ static void init_thread (struct thread *, const char *name, int priority);
 static void do_schedule(int status);
 static void schedule (void);
 static tid_t allocate_tid (void);
+static fxq14 load_avg;
 
 bool priority_sort(const struct list_elem *,const struct list_elem *, void *aux UNUSED);
 
@@ -116,7 +121,9 @@ thread_init (void) {
 	/* Init the globla thread context */
 	lock_init (&tid_lock);
 	list_init (&ready_list);
+	list_init (&thread_list);
 	list_init (&destruction_req);
+	load_avg = 0;
 
 	/* Set up a thread structure for the running thread. */
 	initial_thread = running_thread ();
@@ -156,6 +163,13 @@ thread_tick (void) {
 #endif
 	else
 		kernel_ticks++;
+
+	if (timer_ticks() % 100 == 0)
+	{
+		int current_thread = list_size(&ready_list);
+		if (t != idle_thread) current_thread++;
+		load_avg = fxq14_int_div(fxq14_int_mul(load_avg, 59), 60) + fxq14_int_div(int_to_fxq14(current_thread), 60);
+	}
 
 	/* Enforce preemption. */
 	if (++thread_ticks >= TIME_SLICE)
@@ -297,6 +311,7 @@ thread_exit (void) {
 	/* Just set our status to dying and schedule another process.
 	   We will be destroyed during the call to schedule_tail(). */
 	intr_disable ();
+	list_remove(&thread_current ()->thread_elem);
 	do_schedule (THREAD_DYING);
 	NOT_REACHED ();
 }
@@ -379,7 +394,12 @@ thread_get_nice (void) {
 int
 thread_get_load_avg (void) {
 	/* TODO: Your implementation goes here */
-	return 0;
+	fxq14 i = load_avg * 100;
+	if (i % FXQ14_ONE >= FXQ14_ONE / 2)
+	{
+		return fxq14_to_int(i)+1;
+	}
+	return fxq14_to_int(i);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
@@ -452,9 +472,24 @@ init_thread (struct thread *t, const char *name, int priority) {
 	t->priority = priority;
 	t->magic = THREAD_MAGIC;
 
+	if (t == initial_thread)
+	{
+		t->recent_cpu = 0;
+		t->nice = 0;
+	}
+	else
+	{
+		t->recent_cpu = thread_current ()->recent_cpu;
+		t->nice = thread_current ()->nice;
+	}
+
+
 	t->my_priority = priority;           // 원래 우선순위 백업 
     t->lock_to_stop = NULL;              // 대기 중인 락 
     list_init (&t->donation_list);       // 기부자 리스트 초기화
+
+	list_push_back (&thread_list, &t->thread_elem);
+
 
 }
 
