@@ -1,3 +1,4 @@
+#include "../include/threads/thread.h"
 #include "threads/thread.h"
 #include <debug.h>
 #include <stddef.h>
@@ -13,8 +14,9 @@
 #include "threads/palloc.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "kernel/list.h"
 #include "intrinsic.h"
-#include "../include/lib/kernel/fixedpoint.h"
+#include "../include/lib/kernel/list.h"
 
 #ifdef USERPROG
 #include "userprog/process.h"
@@ -164,11 +166,64 @@ thread_tick (void) {
 	else
 		kernel_ticks++;
 
-	if (timer_ticks() % 100 == 0)
+	t->recent_cpu= fxq14_int_add( t->recent_cpu, 1);
+
+	if (thread_mlfqs == 1)
 	{
-		int current_thread = list_size(&ready_list);
-		if (t != idle_thread) current_thread++;
-		load_avg = fxq14_int_div(fxq14_int_mul(load_avg, 59), 60) + fxq14_int_div(int_to_fxq14(current_thread), 60);
+		if (timer_ticks() % 4 == 0)
+		{
+			struct list_elem *curr = list_begin(&thread_list);
+			if (list_empty(&thread_list) == false)
+			{
+				struct thread *cur = list_entry(curr, struct thread, thread_elem);
+				while (curr->next != list_end(&thread_list))
+				{
+					cur = list_entry(curr, struct thread, thread_elem);
+					int mlfqs_priority = fxq14_to_int(int_fxq14_sub (PRI_MAX - ((cur->nice * 2)), fxq14_div(cur->recent_cpu, int_to_fxq14(4))));
+					if (mlfqs_priority >= PRI_MAX) cur->priority = PRI_MAX;
+					else if (mlfqs_priority <= PRI_MIN) cur->priority = PRI_MIN;
+					else cur->priority = mlfqs_priority;
+					curr = curr->next;
+				}
+				cur = list_entry(curr, struct thread, thread_elem);
+				int mlfqs_priority = fxq14_to_int(int_fxq14_sub (PRI_MAX - ((cur->nice * 2)), fxq14_div(cur->recent_cpu, int_to_fxq14(4))));
+				if (mlfqs_priority >= PRI_MAX) cur->priority = PRI_MAX;
+				else if (mlfqs_priority <= PRI_MIN) cur->priority = PRI_MIN;
+				else cur->priority = mlfqs_priority;
+			}
+			else
+			{
+				struct thread *cur = t;
+				int mlfqs_priority = fxq14_to_int(int_fxq14_sub (PRI_MAX - ((cur->nice * 2)), fxq14_div(cur->recent_cpu, int_to_fxq14(4))));
+				if (mlfqs_priority >= PRI_MAX) cur->priority = PRI_MAX;
+				else if (mlfqs_priority <= PRI_MIN) cur->priority = PRI_MIN;
+				else cur->priority = mlfqs_priority;
+			}
+		}
+
+		if (timer_ticks() % 100 == 0)
+		{
+			int current_thread = list_size(&ready_list);
+			if (t != idle_thread) current_thread++;
+			load_avg = fxq14_int_div(fxq14_int_mul(load_avg, 59), 60) + fxq14_int_div(int_to_fxq14(current_thread), 60);
+			struct list_elem *curr = list_begin(&thread_list);
+			if (list_empty(&thread_list) == false)
+			{
+				while (curr->next != list_end(&thread_list))
+				{
+					fxq14 new_cpu = fxq14_mul( fxq14_div(fxq14_int_mul(load_avg, 2), fxq14_int_add(fxq14_int_mul(load_avg, 2),1)), fxq14_int_add(list_entry(curr, struct thread, thread_elem)->recent_cpu,list_entry(curr, struct thread, thread_elem)->nice));
+					list_entry(curr, struct thread, thread_elem)->recent_cpu = new_cpu;
+					curr = curr->next;
+				}
+				fxq14 new_cpu = fxq14_mul( fxq14_div(fxq14_int_mul(load_avg, 2), fxq14_int_add(fxq14_int_mul(load_avg, 2),1)), fxq14_int_add(list_entry(curr, struct thread, thread_elem)->recent_cpu,list_entry(curr, struct thread, thread_elem)->nice));
+				list_entry(curr, struct thread, thread_elem)->recent_cpu = new_cpu;
+			}
+			else
+			{
+				fxq14 new_cpu = fxq14_mul( fxq14_div(fxq14_int_mul(load_avg, 2), fxq14_int_add(fxq14_int_mul(load_avg, 2),1)), fxq14_int_add(list_entry(curr, struct thread, thread_elem)->recent_cpu,list_entry(curr, struct thread, thread_elem)->nice));
+				list_entry(curr, struct thread, thread_elem)->recent_cpu = new_cpu;
+			}
+		}
 	}
 
 	/* Enforce preemption. */
@@ -380,7 +435,7 @@ thread_get_priority (void) {
 /* Sets the current thread's nice value to NICE. */
 void
 thread_set_nice (int nice UNUSED) {
-	/* TODO: Your implementation goes here */
+	thread_current ()->nice = nice;
 }
 
 /* Returns the current thread's nice value. */
@@ -393,20 +448,15 @@ thread_get_nice (void) {
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) {
-	/* TODO: Your implementation goes here */
 	fxq14 i = load_avg * 100;
-	if (i % FXQ14_ONE >= FXQ14_ONE / 2)
-	{
-		return fxq14_to_int(i)+1;
-	}
-	return fxq14_to_int(i);
+	return fxq14_rounding(i);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) {
-	/* TODO: Your implementation goes here */
-	return 0;
+		fxq14 i = thread_current()->recent_cpu * 100;
+		return fxq14_rounding(i);
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.

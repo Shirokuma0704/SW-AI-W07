@@ -4,7 +4,10 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+
+#include "../lib/kernel/fixedpoint.h"
 #include "threads/interrupt.h"
+#include "kernel/fixedpoint.h"
 #ifdef VM
 #include "vm/vm.h"
 #endif
@@ -105,7 +108,7 @@ struct thread {
 	struct lock *lock_to_stop;			// 어떤 lock때문에 멈춰 있는지
 	struct list_elem donation_elem;		// 다른 스레드의 기부해준 스레드 목록에 들어가기 위함
 
-	int recent_cpu;
+	fxq14 recent_cpu;
 	int nice;
 
 #ifdef USERPROG
