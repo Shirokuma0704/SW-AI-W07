@@ -127,9 +127,9 @@ sema_up (struct semaphore *sema) {
 
 	sema->value++;						// 공유 자원을 다 썼으니 +1 (이제 다른 스레드가 사용 가능)
 
-	intr_set_level (old_level);			// 인터럽트 복원
-
 	priority_thread_yield();			// waiters에 있던 스레드가 현재 실행중인 스레드의 우선순위보다 높을 수 있음 
+
+	intr_set_level (old_level);			// 인터럽트 복원
 
 }
 
@@ -206,29 +206,32 @@ lock_acquire (struct lock *lock) {
 	ASSERT (!lock_held_by_current_thread (lock));
 
 	struct thread *curr = thread_current();
-	
-	// 이미 락을 소유한 스레드가 존재하고, 소유자의 우선순위가 요청자(현재 스레드)보다 낮다면
-    // 소유자가 작업을 빨리 끝내고 락을 해제할 수 있도록 현재 스레드의 우선순위를 기부한다
-	if(lock->holder != NULL){
-		curr->lock_to_stop = lock; // 어떤 lock때문에 멈춰 있는지 기록	
 
-		// donation_list에 추가
-		list_insert_ordered (&lock->holder->donation_list, &curr->donation_elem, &donate_priority_sort, NULL);	
+	if(thread_mlfqs == false){	
+		// 이미 락을 소유한 스레드가 존재하고, 소유자의 우선순위가 요청자(현재 스레드)보다 낮다면
+    	// 소유자가 작업을 빨리 끝내고 락을 해제할 수 있도록 현재 스레드의 우선순위를 기부한다
+		if(lock->holder != NULL){
+			curr->lock_to_stop = lock; // 어떤 lock때문에 멈춰 있는지 기록	
 
-		if (lock->holder->priority < curr->priority){	// lock 되어있는 스레드보다 우선순위가 높다면
-			// donation_list에서 가장 우선순위가 높은 값(가장 앞의 값)을 lock->holder->priority로 저장
-			lock->holder->priority = list_entry (list_begin (&lock->holder->donation_list), struct thread, donation_elem)->priority;
+			// donation_list에 추가
+			list_insert_ordered (&lock->holder->donation_list, &curr->donation_elem, &donate_priority_sort, NULL);	
+
+			if (lock->holder->priority < curr->priority){	// lock 되어있는 스레드보다 우선순위가 높다면	
+				// donation_list에서 가장 우선순위가 높은 값(가장 앞의 값)을 lock->holder->priority로 저장
+				lock->holder->priority = list_entry (list_begin (&lock->holder->donation_list), struct thread, donation_elem)->priority;
+			}
+
+			// 중첩 기부 해결 함수
+			nest_donation(curr);
 		}
-
-		// 중첩 기부 해결 함수
-		nest_donation(curr);
 	}
 
-	// 락이 풀릴 때까지 뒤에 온(락 건 공유자원을 필요로 한) 스레드들을 재우고 줄세우기 위해
-	sema_down (&lock->semaphore);
-	// 락 획득
-	curr->lock_to_stop = NULL;
-    lock->holder = curr;
+		// 락이 풀릴 때까지 뒤에 온(락 건 공유자원을 필요로 한) 스레드들을 재우고 줄세우기 위해
+		sema_down (&lock->semaphore);
+		// 락 획득
+		curr->lock_to_stop = NULL;
+   		lock->holder = curr;
+	
 }
 
 bool nest_donation (struct thread *t){
@@ -274,35 +277,36 @@ lock_release (struct lock *lock) {
 	ASSERT (lock != NULL);
 	ASSERT (lock_held_by_current_thread (lock));
 
-	struct thread *curr = thread_current();
+	if(thread_mlfqs == false){
+
+		struct thread *curr = thread_current();
 
 
-	// 해제한 lock을 기다리던 스레드들을 donation에서 제거
-	struct list_elem *e = list_begin (&curr->donation_list);
+		// 해제한 lock을 기다리던 스레드들을 donation에서 제거
+		struct list_elem *e = list_begin (&curr->donation_list);
 
-	while (e != list_end (&curr->donation_list)) {
-    	struct thread *t = list_entry (e, struct thread, donation_elem);
+		while (e != list_end (&curr->donation_list)) {
+    		struct thread *t = list_entry (e, struct thread, donation_elem);
 
-    	if (t->lock_to_stop == lock) {
-        	/* 지우면서 동시에 다음 노드 주소를 받아서 e에 넣어줌! */
-        	e = list_remove (e);
-    	} else {
-        	e = list_next (e);
-    	}
+    		if (t->lock_to_stop == lock) {
+        		/* 지우면서 동시에 다음 노드 주소를 받아서 e에 넣어줌! */
+        		e = list_remove (e);
+    		} else {
+        		e = list_next (e);
+    		}
+		}
+
+		curr->priority = curr->my_priority;
+
+		if(!list_empty (&curr->donation_list)){	
+			// 남은 기부자 중 최대값으로 priority 재계산 후 내 원래 우선순위보다 높다면 교체 진행
+			int highest_donation_priority = list_entry (list_begin (&curr->donation_list), struct thread, donation_elem)->priority;
+
+			if(curr->priority < highest_donation_priority) curr->priority = highest_donation_priority;
+		}
 	}
-
-	curr->priority = curr->my_priority;
-
-	if(!list_empty (&curr->donation_list)){	
-		// 남은 기부자 중 최대값으로 priority 재계산 후 내 원래 우선순위보다 높다면 교체 진행
-		int highest_donation_priority = list_entry (list_begin (&curr->donation_list), struct thread, donation_elem)->priority;
-
-		if(curr->priority < highest_donation_priority) curr->priority = highest_donation_priority;
-	}
-
-
-	lock->holder = NULL;			// unlock
-	sema_up (&lock->semaphore);		// 다른 스레드가 unlock한 자원을 사용가능하게함
+		lock->holder = NULL;			// unlock
+		sema_up (&lock->semaphore);		// 다른 스레드가 unlock한 자원을 사용가능하게함
 }
 
 /* Returns true if the current thread holds LOCK, false

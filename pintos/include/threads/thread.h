@@ -104,6 +104,10 @@ struct thread {
 	struct lock *lock_to_stop;			// 어떤 lock때문에 멈춰 있는지
 	struct list_elem donation_elem;		// 다른 스레드의 기부해준 스레드 목록에 들어가기 위함 
 
+	int nice;							// nice 정의 (다른 스레드에게 얼마나 양보적인지)(범위는 -20 ~ 20)
+	int recent_cpu;						// recent_cpu 정의 (각 프로세스가 최근에 cpu 시간을 얼마나 사용했는지)
+	struct list_elem allelem;			// all_list에 넣기 위함
+
 #ifdef USERPROG
 	/* Owned by userprog/process.c. */
 	uint64_t *pml4;                     /* Page map level 4 */
@@ -122,7 +126,12 @@ struct thread {
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
+// 커널 옵션으로 -mlfqs를 전달하면 thread_mlfqs가 true로 설정됨. 기본값은 false
+// thread_mlfqs가 false이면, 우선순위 스케줄러 + 기부(Donation) 방식으로 작동함
+// thread_mlfqs가 true이면 MLFQS(다단계 피드백 큐 스케줄러)방식으로 작동함
 extern bool thread_mlfqs;
+
+extern int load_avg;					// load_avg 정의
 
 void thread_init (void);
 void thread_start (void);
@@ -150,6 +159,13 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+void mlfqs_calculate_priority (struct thread *t);
+void mlfqs_calculate_recent_cpu (struct thread *t);
+void mlfqs_calculate_load_avg (void);
+void mlfqs_increment_recent_cpu (void);
+void mlfqs_recalculate_all_priority (void);
+void mlfqs_recalculate_all_recent_cpu (void);
 
 void do_iret (struct intr_frame *tf);
 
