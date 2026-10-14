@@ -127,9 +127,9 @@ sema_up (struct semaphore *sema) {
 
 	sema->value++;						// 공유 자원을 다 썼으니 +1 (이제 다른 스레드가 사용 가능)
 
-	priority_thread_yield();			// waiters에 있던 스레드가 현재 실행중인 스레드의 우선순위보다 높을 수 있음 
-
 	intr_set_level (old_level);			// 인터럽트 복원
+
+	priority_thread_yield();			// waiters에 있던 스레드가 현재 실행중인 스레드의 우선순위보다 높을 수 있음 
 
 }
 
@@ -226,11 +226,11 @@ lock_acquire (struct lock *lock) {
 		}
 	}
 
-		// 락이 풀릴 때까지 뒤에 온(락 건 공유자원을 필요로 한) 스레드들을 재우고 줄세우기 위해
-		sema_down (&lock->semaphore);
-		// 락 획득
-		curr->lock_to_stop = NULL;
-   		lock->holder = curr;
+	// 락이 풀릴 때까지 뒤에 온(락 건 공유자원을 필요로 한) 스레드들을 재우고 줄세우기 위해
+	sema_down (&lock->semaphore);
+	// 락 획득
+	curr->lock_to_stop = NULL;
+   	lock->holder = curr;
 	
 }
 
@@ -305,8 +305,8 @@ lock_release (struct lock *lock) {
 			if(curr->priority < highest_donation_priority) curr->priority = highest_donation_priority;
 		}
 	}
-		lock->holder = NULL;			// unlock
-		sema_up (&lock->semaphore);		// 다른 스레드가 unlock한 자원을 사용가능하게함
+	lock->holder = NULL;			// unlock
+	sema_up (&lock->semaphore);		// 다른 스레드가 unlock한 자원을 사용가능하게함
 }
 
 /* Returns true if the current thread holds LOCK, false

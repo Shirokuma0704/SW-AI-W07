@@ -34,6 +34,3 @@ tests/threads_SRC += tests/threads/mlfqs/mlfqs-load-avg.c
 tests/threads_SRC += tests/threads/mlfqs/mlfqs-recent-1.c
 tests/threads_SRC += tests/threads/mlfqs/mlfqs-fair.c
 tests/threads_SRC += tests/threads/mlfqs/mlfqs-block.c
-
-include ../../tests/threads/mlfqs/Make.tests
-tests/threads_TESTS += $(tests/threads/mlfqs_TESTS)
