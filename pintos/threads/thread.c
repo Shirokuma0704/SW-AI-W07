@@ -199,6 +199,7 @@ thread_tick (void) {
 				else if (mlfqs_priority <= PRI_MIN) cur->priority = PRI_MIN;
 				else cur->priority = mlfqs_priority;
 			}
+			list_sort(&ready_list, priority_sort, NULL);
 		}
 
 		if (timer_ticks() % 100 == 0)
